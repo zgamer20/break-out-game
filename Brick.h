@@ -1,22 +1,19 @@
-#include "GameObject.h"
 #ifndef BRICK_H
 #define BRICK_H
-#include "raylib.h"
 
-class Brick : public PhysicalObject, public VisualObject{
+#include <raylib.h>
+
+class Brick {
 private:
     Rectangle rect;
     bool active;
-    //Color color;
 
 public:
-    Brick(float x, float y, float width, float height, Color c);
+    Brick(float x, float y, float w, float h);
     void Draw();
-    bool IsActive() { return active; }
-    void SetActive(bool a) { active = a; }
-    Rectangle GetRect() { return rect; }
-    Color GetColor() const { return color; }
+    bool IsActive();
+    void SetActive(bool a);
+    Rectangle GetRect();
 };
 
 #endif
-//g++ main.cpp PowerUp.cpp Paddle.cpp Ball.cpp Brick.cpp -o game -lraylib -lGL -lm -lpthread -ldl -lrt -lX11

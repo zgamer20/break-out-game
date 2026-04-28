@@ -1,14 +1,15 @@
 #include "Brick.h"
 
-Brick::Brick(float x, float y, float width, float height, Color c) {
-    rect = { x, y, width, height };
+Brick::Brick(float x, float y, float w, float h) {
+    rect = {x, y, w, h};
     active = true;
-    color = c;
 }
 
 void Brick::Draw() {
-    if (active) {
-        DrawRectangleRec(rect, color);
-        DrawRectangleLinesEx(rect, 1, WHITE);
-    }
+    if (active)
+        DrawRectangleRec(rect, GREEN);
 }
+
+bool Brick::IsActive() { return active; }
+void Brick::SetActive(bool a) { active = a; }
+Rectangle Brick::GetRect() { return rect; }

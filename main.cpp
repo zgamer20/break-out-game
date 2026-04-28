@@ -2,179 +2,140 @@
 #include "Ball.h"
 #include "Paddle.h"
 #include "Brick.h"
-#include "PowerUp.h"   // 道具系统
+#include "PowerUp.h"
 #include <vector>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <ctime>
-#include <cmath>
+#include <thread>
+#include <atomic>
+#include <mutex>
 
-struct ScoreEntry {
-    char name[32];
-    int score;
-    time_t timestamp;
-};
-
-class Leaderboard {
-private:
-    static const int MAX_ENTRIES = 10;
-    ScoreEntry entries[MAX_ENTRIES];
-    int count;
-    const char* filename;
-
-public:
-    Leaderboard(const char* file) : count(0), filename(file) { Load(); }
-
-    void Load() {
-        FILE* f = fopen(filename, "r");
-        if (f) {
-            count = 0;
-            while (count < MAX_ENTRIES && fscanf(f, "%31s %d %ld", entries[count].name, &entries[count].score, &entries[count].timestamp) == 3)
-                count++;
-            fclose(f);
-        }
-    }
-
-    void Save() {
-        FILE* f = fopen(filename, "w");
-        if (f) {
-            for (int i = 0; i < count; i++)
-                fprintf(f, "%s %d %ld\n", entries[i].name, entries[i].score, entries[i].timestamp);
-            fclose(f);
-        }
-    }
-
-    int AddScore(const char* name, int score) {
-        if (count >= MAX_ENTRIES && score <= entries[count - 1].score) return 0;
-        ScoreEntry ne;
-        strncpy(ne.name, name, 31); ne.name[31] = 0;
-        ne.score = score; ne.timestamp = time(NULL);
-        int pos = 0;
-        while (pos < count && entries[pos].score >= score) pos++;
-        if (count < MAX_ENTRIES) count++;
-        for (int i = count - 1; i > pos; i--) entries[i] = entries[i - 1];
-        entries[pos] = ne;
-        Save();
-        return pos + 1;
-    }
-
-    bool GetEntry(int rank, ScoreEntry& e) {
-        if (rank > 0 && rank <= count) { e = entries[rank - 1]; return true; }
-        return false;
-    }
-
-    int GetCount() { return count; }
-    bool CanEnter(int s) { return count < MAX_ENTRIES || s > entries[count - 1].score; }
-};
-
-static Font chineseFont;
-static bool fontLoaded = false;
-
-void InitChineseFont() {
-    const char* text = "分数生命暂停继续重新开始游戏结束胜利排行榜第名按P暂停按R重新开始时间倍率落地惩罚恭喜进入空格发射等待加长中减速中";
-    int cnt = 0;
-    int* codes = LoadCodepoints(text, &cnt);
-    const char* paths[] = {
-        "Noto-Sans-SC-Bold-2.ttf",
-        "../Noto-Sans-SC-Bold-2.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf",
-        "C:/Windows/Fonts/msyh.ttc",
-        "/System/Library/Fonts/PingFang.ttc"
-    };
-    chineseFont = GetFontDefault();
-    for (int i = 0; i < 5; i++) {
-        if (FileExists(paths[i])) {
-            chineseFont = LoadFontEx(paths[i], 48, codes, cnt);
-            if (chineseFont.texture.id != 0) { fontLoaded = true; break; }
-        }
-    }
-    UnloadCodepoints(codes);
-}
-
-void DrawChineseText(const char* t, int x, int y, int sz, Color c) {
-    DrawTextEx(chineseFont, t, {(float)x,(float)y}, sz,1,c);
-}
-
-void DrawChineseTextCentered(const char* t, int y, int sz, Color c) {
-    Vector2 szv = MeasureTextEx(chineseFont,t,sz,1);
-    DrawTextEx(chineseFont,t,{(GetScreenWidth()-szv.x)/2,(float)y},sz,1,c);
-}
-
-int CalculateScore(int base, float time) {
-    float m = 5.0f - time * 0.05f;
-    if (m < 1) m = 1;
-    return (int)(base * m);
-}
+std::mutex powerUpMutex;
 
 int main() {
-    const int w = 800, h = 600;
-    InitWindow(w, h, "Breakout + PowerUps");
-    InitChineseFont();
-    srand(time(NULL));
-    Leaderboard lb("scores.txt");
-    Game game;
-    int rank = 0;
-    bool pause = false, showLb = false;
+    srand((unsigned int)time(NULL));
+    const int screenWidth = 800;
+    const int screenHeight = 600;
+    InitWindow(screenWidth, screenHeight, "打砖块 道具完整版");
 
+    std::atomic<bool> gameRunning{true};
+    std::vector<Ball> balls;
+    balls.emplace_back(Vector2{400, 300}, Vector2{2.5f, 2.5f}, 10);
+    Paddle paddle(350, 550, 100, 20);
+
+    std::vector<Brick> bricks;
+    float brickWidth = 80;
+    float brickHeight = 30;
+    for (int row = 0; row < 3; row++) {
+        for (int i = 0; i < 8; i++) {
+            bricks.emplace_back(60 + i * 90, 100 + row*40, brickWidth, brickHeight);
+        }
+    }
+
+    std::vector<PowerUp> powerUps;
+    std::thread powerUpThread([&](){
+        while(gameRunning){
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            if(!gameRunning) break;
+            float x=(float)(rand()%(700-50+1)+50);
+            PowerUpType type=static_cast<PowerUpType>(rand()%3);
+            std::lock_guard<std::mutex>lock(powerUpMutex);
+            powerUps.emplace_back(x,50.0f,type);
+        }
+    });
+    powerUpThread.detach();
     SetTargetFPS(60);
-    while (!WindowShouldClose()) {
-        if (IsKeyPressed(KEY_P) && !game.gameOver) pause = !pause;
-        if (IsKeyPressed(KEY_R)) { game.Reset(); rank = 0; pause = false; showLb = false; }
-        if (IsKeyPressed(KEY_L)) showLb = !showLb;
 
-        if (!game.gameOver && !pause) {
-            game.Update(GetFrameTime());
-            if (game.gameOver && lb.CanEnter(game.score)) rank = lb.AddScore("Player", game.score);
+    while (!WindowShouldClose()) {
+        float dt = GetFrameTime();
+        paddle.Update(dt);
+
+        for (auto& ball : balls) {
+            ball.Move();
+            ball.BounceEdge(screenWidth, screenHeight);
+            ball.UpdateSpeed(dt);
+        }
+
+        if (IsKeyDown(KEY_LEFT)) paddle.MoveLeft(5);
+        if (IsKeyDown(KEY_RIGHT)) paddle.MoveRight(5);
+
+        // 球碰砖块
+        for (auto& ball : balls) {
+            for (auto& brick : bricks) {
+                if (!brick.IsActive()) continue;
+                if (ball.CheckBrickCollision(brick.GetRect())) {
+                    brick.SetActive(false);
+                    if (rand() % 100 < 30) {
+                        PowerUpType type = static_cast<PowerUpType>(rand() % 3);
+                        powerUps.emplace_back(brick.GetRect().x, brick.GetRect().y, type);
+                    }
+                }
+            }
+        }
+
+        // 道具更新
+        std::lock_guard<std::mutex> lock(powerUpMutex);
+        for (int i = (int)powerUps.size() - 1; i >= 0; i--) {
+            PowerUp& pu = powerUps[i];
+            if (!pu.active) continue;
+            pu.Update(dt);
+
+            if (CheckCollisionRecs(pu.rect, paddle.GetRect())) {
+                pu.active = false;
+                switch (pu.type) {
+                    case PowerUpType::PADDLE_EXTEND:
+                        paddle.Extend(40.0f, 5.0f);
+                        break;
+                    case PowerUpType::MULTI_BALL:
+                    {
+                        Ball& mainBall = balls[0];
+                        Vector2 newPos = mainBall.GetPos();
+                        Vector2 newSpeed = {(float)(rand()%4-2), (float)(rand()%4-2)};
+                        if (newSpeed.x==0) newSpeed.x=2.5f;
+                        if (newSpeed.y==0) newSpeed.y=-2.5f;
+                        balls.emplace_back(newPos, newSpeed, 10);
+                        break;
+                    }
+                    case PowerUpType::SLOW_BALL:
+                    {
+                        for (auto& ball : balls) ball.SlowDown(0.7f,5.0f);
+                        break;
+                    }
+                }
+            }
+            if (pu.IsOutOfScreen(screenHeight)) powerUps.erase(powerUps.begin()+i);
+        }
+
+        // 球碰挡板
+        for (auto& ball : balls) {
+            Rectangle brect = { ball.GetPos().x - 10, ball.GetPos().y - 10, 20, 20 };
+            if (CheckCollisionRecs(brect, paddle.GetRect())) {
+                ball.ReverseY();
+            }
+        }
+
+        // 球掉到底部
+        for (auto& ball : balls) {
+            if (ball.GetPos().y > screenHeight + 50) {
+                gameRunning = false;
+                break;
+            }
         }
 
         BeginDrawing();
-        ClearBackground({30,30,40,255});
+        ClearBackground(RAYWHITE);
+        DrawRectangle(0,0,5,screenHeight,GRAY);
+        DrawRectangle(screenWidth-5,0,5,screenHeight,GRAY);
+        DrawRectangle(0,0,screenWidth,5,GRAY);
 
-        if (showLb) {
-            DrawRectangle(0,0,w,h,Fade(BLACK,0.9f));
-            DrawChineseTextCentered("排行榜",40,36,GOLD);
-            DrawText("RANK",150,90,20,Fade(WHITE,0.6f));
-            DrawText("NAME",250,90,20,Fade(WHITE,0.6f));
-            DrawText("SCORE",450,90,20,Fade(WHITE,0.6f));
-            DrawText("DATE",550,90,20,Fade(WHITE,0.6f));
-            DrawLine(150,115,700,115,Fade(WHITE,0.3f));
-            for(int i=0;i<lb.GetCount()&&i<10;i++){
-                ScoreEntry e; lb.GetEntry(i+1,e);
-                int y=130+i*35;
-                Color rc = (i==0)?GOLD:(i==1)?LIGHTGRAY:(i==2)?ORANGE:WHITE;
-                DrawText(TextFormat("#%d",i+1),150,y,22,rc);
-                DrawText(e.name,250,y,22,rc);
-                DrawText(TextFormat("%d",e.score),450,y,22,rc);
-                char buf[32]; strftime(buf,32,"%m/%d",localtime(&e.timestamp));
-                DrawText(buf,550,y,20,Fade(rc,0.7f));
-            }
-            DrawChineseTextCentered("按 L 关闭",h-50,20,Fade(WHITE,0.5f));
-        } else if (pause) {
-            DrawRectangle(0,0,w,h,Fade(BLACK,0.7f));
-            DrawChineseTextCentered("暂停",h/2-40,48,YELLOW);
-            DrawChineseTextCentered("按 P 继续",h/2+30,24,WHITE);
-            game.Draw();
-        } else if (game.gameOver) {
-            DrawRectangle(0,0,w,h,Fade(BLACK,0.85f));
-            if (game.victory) {
-                DrawChineseTextCentered("胜利",h/2-80,48,GREEN);
-                DrawText(TextFormat("分数:%d",game.score),w/2-80,h/2-30,28,YELLOW);
-            } else {
-                DrawChineseTextCentered("游戏结束",h/2-80,48,RED);
-                DrawText(TextFormat("分数:%d",game.score),w/2-60,h/2-30,28,YELLOW);
-            }
-            if(rank>0){
-                char buf[64]; sprintf(buf,"恭喜进入排行榜第%d名!",rank);
-                DrawChineseTextCentered(buf,h/2+40,24,GOLD);
-            }
-            DrawChineseTextCentered("按 R 重新开始",h/2+90,24,WHITE);
-            game.Draw();
-        } else {
-            game.Draw();
-        }
+        for (auto& brick : bricks) brick.Draw();
+        for (auto& ball : balls) ball.Draw();
+        paddle.Draw();
+        for (auto& pu : powerUps) pu.Draw();
         EndDrawing();
     }
+
+    gameRunning = false;
     CloseWindow();
     return 0;
 }
