@@ -8,10 +8,13 @@
 #include <cstring>
 #include <ctime>
 
-// ===================== 多线程异步加载 =====================
+// ===================== 【作业要求】多线程异步加载 =====================
 #include <thread>
 #include <mutex>
 #include <chrono>
+
+std::vector<Color> brickRandColors;
+bool brickColorInit = false;
 
 std::mutex loadMutex;
 bool isLoading = false;
@@ -126,7 +129,7 @@ int main() {
             winCount = (int)bricks.size();
         }
         if (IsKeyPressed(KEY_L)) {
-            // ===================== 按L触发异步加载 =====================
+            // ===================== 【作业】按L触发异步加载 =====================
             std::lock_guard<std::mutex> lock(loadMutex);
             if (!isLoading && !textureLoaded) {
                 std::thread loadThread(SimulateLoadTexture);
@@ -167,12 +170,41 @@ int main() {
         ClearBackground(Color{30, 30, 40, 255});
         DrawRectangle(0, 0, 5, screenHeight, GRAY); DrawRectangle(screenWidth - 5, 0, 5, screenHeight, GRAY); DrawRectangle(0, 0, screenWidth, 5, GRAY);
         
-        // ===================== 加载完成后砖块变绿 =====================
-        for (auto& brick : bricks) {
-            if (textureLoaded) {
-                DrawRectangleRec(brick.GetRect(), GREEN);
-                DrawRectangleLinesEx(brick.GetRect(), 1, WHITE);
-            } else {
+        // ===================== 【作业】加载完成后砖块变色 =====================
+        for (auto& brick : bricks)
+        {
+            bool loadedFlag = false;
+            {
+                std::lock_guard<std::mutex> lock(loadMutex);
+                loadedFlag = textureLoaded;
+            }
+
+            if (loadedFlag)
+            {
+                // 只初始化一次随机颜色
+                if (!brickColorInit)
+                {
+                    brickRandColors.clear();
+                    for (int i = 0; i < bricks.size(); i++)
+                    {
+                        unsigned char r = (unsigned char)GetRandomValue(40, 255);
+                        unsigned char g = (unsigned char)GetRandomValue(40, 255);
+                        unsigned char b = (unsigned char)GetRandomValue(40, 255);
+                        brickRandColors.push_back({r, g, b, 255});
+                    }
+                    brickColorInit = true;
+                }
+
+                // 找到当前砖块下标
+                int idx = &brick - &bricks[0];
+                if (brick.IsActive())
+                {
+                    DrawRectangleRec(brick.GetRect(), brickRandColors[idx]);
+                    DrawRectangleLinesEx(brick.GetRect(), 1, WHITE);
+                }
+            }
+            else
+            {
                 brick.Draw();
             }
         }
@@ -230,7 +262,7 @@ int main() {
             DrawText("Press R to restart", screenWidth/2 - MeasureText("Press R to restart",24)/2, screenHeight/2 + 90, 24, WHITE);
         }
         
-        // ===================== 显示加载状态 =====================
+        // ===================== 【作业】显示加载状态 =====================
         {
             std::lock_guard<std::mutex> lock(loadMutex);
             if (isLoading) {
