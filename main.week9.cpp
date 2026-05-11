@@ -8,14 +8,14 @@
 #include <cstring>
 #include <ctime>
 
-// ===================== 优化：按行划分砖块（空间划分） =====================
-struct BrickRow {
-    std::vector<Brick*> bricks;
-};
-std::vector<BrickRow> brickRows;
-int BRICK_ROW_COUNT = 5;
-int BRICK_COL_COUNT = 8;
-// =====================================================================
+// ===================== PPT: 网格空间划分参数 =====================
+#define GRID_W 8
+#define GRID_H 6
+#define CELL_W (850 / GRID_W)   // 每个网格宽度
+#define CELL_H (600 / GRID_H)   // 每个网格高度
+
+std::vector<Brick*> grid[GRID_W][GRID_H];
+// =================================================================
 
 struct ScoreEntry {
     char name[32];
@@ -79,7 +79,7 @@ int CalculateScore(int baseScore, float gameTime) {
 
 int main() {
     const int screenWidth = 850, screenHeight = 600;
-    InitWindow(screenWidth, screenHeight, "Breakout - 优化版（空间划分）");
+    InitWindow(screenWidth, screenHeight, "Breakout - 网格优化版");
     Leaderboard leaderboard("scores.txt");
     
     Ball ball({400.0f, 530.0f}, {0.0f, 0.0f}, 10.0f);
@@ -87,17 +87,26 @@ int main() {
     
     std::vector<Brick> bricks;
     Color brickColors[] = {RED, ORANGE, YELLOW, GREEN, BLUE};
-    for (int row = 0; row < BRICK_ROW_COUNT; row++) {
-        for (int col = 0; col < BRICK_COL_COUNT; col++) {
+    for (int row = 0; row < 5; row++) {
+        for (int col = 0; col < 8; col++) {
             bricks.emplace_back(50 + col * 95, 80 + row * 35, 85, 25, brickColors[row]);
         }
     }
 
-    // ===================== 初始化空间划分的砖块行 =====================
-    brickRows.resize(BRICK_ROW_COUNT);
-    for (int row = 0; row < BRICK_ROW_COUNT; row++) {
-        for (int col = 0; col < BRICK_COL_COUNT; col++) {
-            brickRows[row].bricks.push_back(&bricks[row * BRICK_COL_COUNT + col]);
+    // ===================== 初始化网格（按PPT示例） =====================
+    // 先清空网格
+    for (int i = 0; i < GRID_W; i++) {
+        for (int j = 0; j < GRID_H; j++) {
+            grid[i][j].clear();
+        }
+    }
+    // 将砖块分配到对应的网格
+    for (auto& brick : bricks) {
+        Rectangle rect = brick.GetRect();
+        int gx = (int)(rect.x / CELL_W);
+        int gy = (int)(rect.y / CELL_H);
+        if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
+            grid[gx][gy].push_back(&brick);
         }
     }
     // =================================================================
@@ -106,24 +115,30 @@ int main() {
     bool gameOver = false, paused = false, victory = false, showLeaderboard = false;
     float gameTime = 0.0f;
     
-    SetTargetFPS(0);
+    SetTargetFPS(60); // 恢复正常帧率！
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_P) && !gameOver) paused = !paused;
         if (IsKeyPressed(KEY_R)) {
             ball.ResetToPaddle(paddle.GetRect().x + paddle.GetRect().width / 2, paddle.GetRect().y);
             score = 0; lives = 3; gameOver = false; victory = false; paused = false; showLeaderboard = false; gameTime = 0.0f;
             bricks.clear();
-            for (int row = 0; row < BRICK_ROW_COUNT; row++) {
-                for (int col = 0; col < BRICK_COL_COUNT; col++) {
+            for (int row = 0; row < 5; row++) {
+                for (int col = 0; col < 8; col++) {
                     bricks.emplace_back(50 + col * 95, 80 + row * 35, 85, 25, brickColors[row]);
                 }
             }
-            // 重置空间划分
-            brickRows.clear();
-            brickRows.resize(BRICK_ROW_COUNT);
-            for (int row = 0; row < BRICK_ROW_COUNT; row++) {
-                for (int col = 0; col < BRICK_COL_COUNT; col++) {
-                    brickRows[row].bricks.push_back(&bricks[row * BRICK_COL_COUNT + col]);
+            // 重置网格
+            for (int i = 0; i < GRID_W; i++) {
+                for (int j = 0; j < GRID_H; j++) {
+                    grid[i][j].clear();
+                }
+            }
+            for (auto& brick : bricks) {
+                Rectangle rect = brick.GetRect();
+                int gx = (int)(rect.x / CELL_W);
+                int gy = (int)(rect.y / CELL_H);
+                if (gx >= 0 && gx < GRID_W && gy >= 0 && gy < GRID_H) {
+                    grid[gx][gy].push_back(&brick);
                 }
             }
             winCount = (int)bricks.size();
@@ -146,25 +161,30 @@ int main() {
             ball.BounceEdge(screenWidth, screenHeight);
             ball.BouncePaddle(paddle.GetRect());
 
-            // ===================== 优化后的碰撞检测（只检测当前行附近的砖块） =====================
-            float ballY = ball.GetPosition().y;
-            // 计算小球所在的砖块行（简单映射）
-            int ballRow = (int)((ballY - 80) / 35);
-            // 只检测当前行、上一行、下一行（避免漏掉）
-            for (int dr = -1; dr <= 1; dr++) {
-                int checkRow = ballRow + dr;
-                if (checkRow >= 0 && checkRow < BRICK_ROW_COUNT) {
-                    for (auto brick : brickRows[checkRow].bricks) {
-                        if (brick->IsActive() && ball.CheckBrickCollision(brick->GetRect())) {
-                            brick->SetActive(false);
-                            score += CalculateScore(10, gameTime);
-                            winCount--;
-                            break;
+            // ===================== PPT: 网格优化碰撞检测 =====================
+            Vector2 ballPos = ball.GetPosition();
+            // 计算小球所在的网格
+            int gx = (int)(ballPos.x / CELL_W);
+            int gy = (int)(ballPos.y / CELL_H);
+
+            // 遍历小球所在网格及相邻网格（避免漏掉边缘碰撞）
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    int checkX = gx + dx;
+                    int checkY = gy + dy;
+                    if (checkX >= 0 && checkX < GRID_W && checkY >= 0 && checkY < GRID_H) {
+                        for (auto brick : grid[checkX][checkY]) {
+                            if (brick->IsActive() && ball.CheckBrickCollision(brick->GetRect())) {
+                                brick->SetActive(false);
+                                score += CalculateScore(10, gameTime);
+                                winCount--;
+                                break; // 一次只处理一次碰撞
+                            }
                         }
                     }
                 }
             }
-            // ==================================================================================
+            // =================================================================
 
             if (winCount <= 0) { gameOver = true; victory = true; if (leaderboard.CanEnter(score)) playerRank = leaderboard.AddScore("Player", score); }
             if (ball.GetPosition().y > screenHeight + 50) {
@@ -176,7 +196,8 @@ int main() {
         
         BeginDrawing();
         ClearBackground(Color{30, 30, 40, 255});
-        DrawFPS(10, 10); // 在屏幕左上角(10,10)位置显示当前帧率
+        DrawFPS(780, 560); // 右下角显示帧率
+        
         DrawRectangle(0, 0, 5, screenHeight, GRAY); DrawRectangle(screenWidth - 5, 0, 5, screenHeight, GRAY); DrawRectangle(0, 0, screenWidth, 5, GRAY);
         
         for (auto& brick : bricks) brick.Draw();
