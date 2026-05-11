@@ -8,7 +8,6 @@
 #include <cstring>
 #include <ctime>
 
-// ===================== 【作业要求】多线程异步加载 =====================
 #include <thread>
 #include <mutex>
 #include <chrono>
