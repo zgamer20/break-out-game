@@ -28,7 +28,7 @@ void Ball::Move() {
 }
 
 void Ball::Draw() {
-    DrawCircleGradient((int)position.x, (int)position.y, radius + 3, Fade(ORANGE, 0.3f), RED);
+    DrawCircle(position.x, position.y, radius + 3, RED);
     DrawCircleV(position, radius, RED);
     
     if (!launched) {
